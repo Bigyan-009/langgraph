@@ -2,14 +2,16 @@ import os
 from typing import Annotated, TypedDict
 
 from dotenv import load_dotenv
+from pymongo import MongoClient
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.checkpoint.mongodb import MongoDBSaver
 
 
 load_dotenv()
@@ -54,22 +56,29 @@ graph.add_conditional_edges("assistant", tools_condition)
 
 graph.add_edge("tools", "assistant")
 
-app = graph.compile()
+
+mongodb_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+client = MongoClient(mongodb_uri)
+
+checkpointer = MongoDBSaver(client=client, db_name="langgraph_tool_memory")
+
+app = graph.compile(checkpointer=checkpointer)
 
 
-result = app.invoke({"messages": [HumanMessage(content="Calculate 45 * 29")]})
-# print(result)
-for index, message in enumerate(result["messages"], start=1):
-    print("\n==============================")
-    print("Message number:", index)
-    print("Message type:", type(message).__name__)
-    print("Content:", message.content)
+user_id = input("Enter user ID: ")
 
-    if hasattr(message, "tool_calls"):
-        print("Tool calls:", message.tool_calls)
+config = {"configurable": {"thread_id": user_id}}
 
-    if hasattr(message, "name"):
-        print("Tool name:", message.name)
 
-    if hasattr(message, "tool_call_id"):
-        print("Tool call ID:", message.tool_call_id)
+print("Chat started. Type 'exit' to stop.")
+
+while True:
+    user_input = input("You: ")
+
+    if user_input.lower() == "exit":
+        print("Chat stopped.")
+        break
+
+    result = app.invoke({"messages": [HumanMessage(content=user_input)]}, config=config)
+
+    print("AI:", result["messages"][-1].content)
